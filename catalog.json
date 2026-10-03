@@ -1,0 +1,12 @@
+{
+  "ignoredRepos": ["plugins-updater", "Tracker", "xbox"],
+  "plugins": [
+    { "repo": "ezplayer", "name": "GroovePlayer", "bundleIDs": ["com.slm.grooveplayer"], "bundleNames": [] },
+    { "repo": "keylab-drumpad-mapper", "name": "Drumpad Remapper", "bundleIDs": ["com.slm.drumpadremapper"], "bundleNames": [] },
+    { "repo": "MIDI-Humanizer", "name": "MIDI Humanizer", "bundleIDs": ["com.slmaudio.midihumanizer", "com.slmaudio.midihumanizer.inst"], "bundleNames": [] },
+    { "repo": "MIDIKeySnap", "name": "MIDIKeySnap", "bundleIDs": ["com.slm.midikeysnap"], "bundleNames": [] },
+    { "repo": "MidiVelocityMapper", "name": "MIDI Velocity Mapper", "bundleIDs": ["com.yourcompany.NewProject"], "bundleNames": ["NewProject"] },
+    { "repo": "midi_notes_mapper", "name": "MIDI Notes Mapper", "bundleIDs": ["com.SLM.MidiMapperEvo"], "bundleNames": [] },
+    { "repo": "vst_input_calibration", "name": "Input Calibration", "bundleIDs": ["com.SLM.InputCalibration"], "bundleNames": [] }
+  ]
+}
