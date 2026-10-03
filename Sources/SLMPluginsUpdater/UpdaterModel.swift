@@ -158,15 +158,17 @@ final class UpdaterModel {
         pendingConfirmation = items
     }
 
-    func confirmPending() async {
-        guard let items = pendingConfirmation else { return }
+    /// Takes the items from the sheet: dismissing it already cleared `pendingConfirmation`.
+    func confirm(_ items: [PluginItem]) async {
         pendingConfirmation = nil
+        guard !items.isEmpty, !isInstalling else { return }
         await install(items)
     }
 
     private func install(_ items: [PluginItem]) async {
         isInstalling = true
         defer { isInstalling = false }
+        append("Installing \(items.map { "\($0.displayName) \($0.latest.tagName)" }.joined(separator: ", "))…")
         let formats = Prefs.enabledFormats
         var staged: [StagedInstall] = []
         var adminCommands: [String: [String]] = [:]

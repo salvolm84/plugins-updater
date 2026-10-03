@@ -52,8 +52,9 @@ struct UpdateSheet: View {
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button(confirmTitle) {
+                    let items = items
                     dismiss()
-                    Task { await model.confirmPending() }
+                    Task { await model.confirm(items) }
                 }
                 .keyboardShortcut(.defaultAction)
             }
