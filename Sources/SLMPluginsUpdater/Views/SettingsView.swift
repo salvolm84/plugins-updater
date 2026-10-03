@@ -6,6 +6,7 @@ struct SettingsView: View {
     @AppStorage(Prefs.includePrereleases) private var includePrereleases = false
     @AppStorage(Prefs.removeQuarantine) private var removeQuarantine = true
     @AppStorage(Prefs.checkOnLaunch) private var checkOnLaunch = true
+    @State private var token = Credentials.savedToken ?? ""
 
     var body: some View {
         Form {
@@ -23,6 +24,15 @@ struct SettingsView: View {
                 Toggle("Check for updates at launch", isOn: $checkOnLaunch)
                 Toggle("Include pre-releases", isOn: $includePrereleases)
                 TextField("GitHub owner", text: $owner)
+            }
+            Section("GitHub access") {
+                SecureField("Personal access token (optional)", text: $token)
+                    .onSubmit { Credentials.save(token) }
+                    .onChange(of: token) { _, new in Credentials.save(new) }
+                Text("Without a token GitHub allows 60 requests per hour, shared by everyone on the same network, and each check uses about 20. A token raises this to 5,000. A fine-grained token with read-only access to public repositories is enough; it's stored in your Keychain. If the GitHub CLI (gh) is logged in, its login is used automatically.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Link("Create a token on GitHub…", destination: URL(string: "https://github.com/settings/personal-access-tokens/new")!)
+                    .font(.caption)
             }
         }
         .formStyle(.grouped)

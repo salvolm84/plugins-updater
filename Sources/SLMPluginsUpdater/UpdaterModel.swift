@@ -24,6 +24,9 @@ final class UpdaterModel {
     private(set) var lastChecked: Date?
     private(set) var lastCheckSummary: String?
     var errorMessage: String?
+    var warningMessage: String?
+    /// How the last check talked to GitHub ("anonymous", "GitHub CLI login", "Settings token").
+    private(set) var authSource: String?
     private(set) var installStates: [String: InstallState] = [:]
     private(set) var log: [LogEntry] = []
 
@@ -45,23 +48,45 @@ final class UpdaterModel {
         guard !isChecking, !isInstalling else { return }
         isChecking = true
         errorMessage = nil
+        warningMessage = nil
         defer { isChecking = false }
 
         do {
             let owner = owner
             let includePre = includePrereleases
+            let (token, source) = await Credentials.resolve()
+            authSource = source
+            let client = GitHubClient(token: token)
             async let catalogTask = Catalog.load()
-            let repos = try await GitHubClient.shared.repos(owner: owner)
+            let repos = try await client.repos(owner: owner)
             let catalog = await catalogTask
             let candidates = repos.filter { !$0.fork && !$0.archived && !catalog.isIgnored($0.name) }
 
-            let withReleases = try await withThrowingTaskGroup(of: (GitHubRepo, [GitHubRelease]).self) { group in
+            // One failing repo shouldn't hide the others.
+            var failures: [Error] = []
+            var withReleases: [(GitHubRepo, [GitHubRelease])] = []
+            await withTaskGroup(of: Result<(GitHubRepo, [GitHubRelease]), Error>.self) { group in
                 for repo in candidates {
-                    group.addTask { (repo, try await GitHubClient.shared.releases(fullName: repo.fullName)) }
+                    group.addTask {
+                        do { return .success((repo, try await client.releases(fullName: repo.fullName))) }
+                        catch { return .failure(error) }
+                    }
                 }
-                var out: [(GitHubRepo, [GitHubRelease])] = []
-                for try await pair in group { out.append(pair) }
-                return out
+                for await result in group {
+                    switch result {
+                    case let .success(pair): withReleases.append(pair)
+                    case let .failure(error): failures.append(error)
+                    }
+                }
+            }
+            if withReleases.isEmpty, let first = failures.first { throw first }
+
+            if !failures.isEmpty {
+                warningMessage = "\(failures.count) repo(s) couldn't be checked: \(failures[0].localizedDescription)"
+            } else if client.staleCount > 0 {
+                let reset = client.rateLimitReset.map { " until \($0.formatted(date: .omitted, time: .shortened))" } ?? ""
+                warningMessage = "GitHub rate limit reached\(reset): showing the last known releases."
+                    + (client.isAuthenticated ? "" : " Add a GitHub token in Settings to avoid this.")
             }
 
             let local = await Task.detached { LocalScanner.scan() }.value
@@ -72,7 +97,8 @@ final class UpdaterModel {
 
             lastChecked = Date()
             lastCheckSummary = "\(updates.count) update(s), \(newInstalls.count) new, \(upToDate.count) up to date"
-            append("Checked \(plugins.count) plugins from github.com/\(owner): \(lastCheckSummary!).")
+            append("Checked \(plugins.count) plugins from github.com/\(owner) (\(source)): \(lastCheckSummary!).")
+            if let warningMessage { append(warningMessage, isError: true) }
         } catch {
             errorMessage = error.localizedDescription
             append("Check failed: \(error.localizedDescription)", isError: true)
@@ -244,6 +270,8 @@ extension UpdaterModel {
         while isChecking { try? await Task.sleep(for: .milliseconds(100)) }
         if lastChecked == nil { await refresh() }
         if let errorMessage { print("error: \(errorMessage)") }
+        if let warningMessage { print("warning: \(warningMessage)") }
+        print("auth: \(authSource ?? "-")")
         for item in plugins {
             let status: String = switch item.status {
             case .updateAvailable: "UPDATE"

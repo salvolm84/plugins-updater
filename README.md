@@ -36,7 +36,16 @@ Open the app. It checks GitHub at launch (you can turn this off in Settings).
 - Enter your password when macOS asks. This runs the `xattr` step.
 - Rescan plug-ins in your DAW.
 
-**Settings** (⌘,) lets you pick formats, turn off the quarantine step, include pre-releases, or point the app at another GitHub owner.
+**Settings** (⌘,) lets you pick formats, turn off the quarantine step, include pre-releases, add a GitHub token, or point the app at another GitHub owner.
+
+### GitHub rate limit
+
+Without a token, GitHub allows 60 API requests per hour. Everyone on the same network shares them (office networks especially), and a check uses about 20. The app works around this:
+
+- Responses are cached with ETags. A check where nothing changed costs no quota.
+- When the limit is hit, the last known releases are shown with a warning.
+- If the [GitHub CLI](https://cli.github.com) is logged in, its login is used automatically (5,000 requests per hour).
+- Or paste a token in **Settings → GitHub access**. It's stored in the Keychain. A fine-grained token with read-only access to public repositories is enough.
 
 ## How detection works
 

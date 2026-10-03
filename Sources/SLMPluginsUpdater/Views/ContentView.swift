@@ -8,11 +8,24 @@ struct ContentView: View {
         @Bindable var model = model
         VStack(spacing: 0) {
             if let error = model.errorMessage {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
+                HStack {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                    Spacer()
+                    SettingsLink { Text("Settings…") }
+                }
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
                     .background(.red.gradient)
+            } else if let warning = model.warningMessage {
+                HStack {
+                    Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    Spacer()
+                    SettingsLink { Text("Settings…") }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(.orange.opacity(0.2))
             }
 
             if model.plugins.isEmpty {
@@ -99,6 +112,9 @@ struct ContentView: View {
             } else if let date = model.lastChecked {
                 Text("Last checked \(date.formatted(date: .omitted, time: .shortened))")
                 if let summary = model.lastCheckSummary { Text("· \(summary)") }
+                if model.authSource == "anonymous" {
+                    Text("· anonymous GitHub access").help("Limited to 60 requests per hour per network. Add a token in Settings.")
+                }
             }
             Spacer()
             Button("Activity Log") { showLog = true }

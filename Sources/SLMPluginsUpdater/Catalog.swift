@@ -38,7 +38,10 @@ struct Catalog: Codable {
     )
 
     static func load() async -> Catalog {
-        guard let data = try? await GitHubClient.shared.fetchData(remoteURL),
+        var request = URLRequest(url: remoteURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
+        request.setValue("SLM-Plugins-Updater", forHTTPHeaderField: "User-Agent")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
               let remote = try? JSONDecoder().decode(Catalog.self, from: data)
         else { return builtIn }
         // Remote entries win; built-in ones fill any gaps.
