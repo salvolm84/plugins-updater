@@ -7,7 +7,7 @@ enum InstallError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .noAssets: "The release has no macOS downloads for the enabled formats."
-        case .noBundles: "The download contains no plug-in bundles for the enabled formats."
+        case .noBundles: "The download contains no bundles for the enabled formats."
         }
     }
 }

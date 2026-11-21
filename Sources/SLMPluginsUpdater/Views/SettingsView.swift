@@ -6,13 +6,14 @@ struct SettingsView: View {
     @AppStorage(Prefs.includePrereleases) private var includePrereleases = false
     @AppStorage(Prefs.removeQuarantine) private var removeQuarantine = true
     @AppStorage(Prefs.checkOnLaunch) private var checkOnLaunch = true
+    @AppStorage(Prefs.autoUpdateApp) private var autoUpdateApp = true
     @State private var token = Credentials.savedToken ?? ""
 
     var body: some View {
         Form {
             Section("Formats to install") {
                 ForEach(PluginFormat.allCases) { FormatToggle(format: $0) }
-                Text("Plug-ins go to ~/Library/Audio/Plug-Ins, apps to /Applications. Existing copies are replaced where they are, and old versions go to the Trash.")
+                Text("Plug-ins go to ~/Library/Audio/Plug-Ins, apps to /Applications. *Standalone app* covers the standalone builds that come with some plug-ins; music apps such as Beat It are always installed. Existing copies are replaced where they are, and old versions go to the Trash.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Security") {
@@ -24,6 +25,11 @@ struct SettingsView: View {
                 Toggle("Check for updates at launch", isOn: $checkOnLaunch)
                 Toggle("Include pre-releases", isOn: $includePrereleases)
                 TextField("GitHub owner", text: $owner)
+            }
+            Section("SLM Plugins Updater \(SelfUpdater.currentVersion?.description ?? "(development build)")") {
+                Toggle("Install updates to this app automatically", isOn: $autoUpdateApp)
+                Text("Each check also looks for a new version of this app. When this is on, it's downloaded and installed in the background, and you're asked to relaunch. If replacing the app needs your administrator password, you're asked before anything is installed.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("GitHub access") {
                 SecureField("Personal access token (optional)", text: $token)

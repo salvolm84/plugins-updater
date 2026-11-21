@@ -5,6 +5,7 @@ enum Prefs {
     static let includePrereleases = "includePrereleases"
     static let removeQuarantine = "removeQuarantine"
     static let checkOnLaunch = "checkOnLaunch"
+    static let autoUpdateApp = "autoUpdateApp"
     static func format(_ f: PluginFormat) -> String { "format.\(f.rawValue)" }
 
     static func registerDefaults() {
@@ -13,6 +14,7 @@ enum Prefs {
             includePrereleases: false,
             removeQuarantine: true,
             checkOnLaunch: true,
+            autoUpdateApp: true,
         ]
         for f in PluginFormat.allCases { defaults[format(f)] = f != .app }
         UserDefaults.standard.register(defaults: defaults)

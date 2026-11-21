@@ -28,10 +28,17 @@ struct ContentView: View {
                 .background(.orange.opacity(0.2))
             }
 
+            if let update = model.appUpdate {
+                AppUpdateBanner(state: update)
+            }
+
             if model.plugins.isEmpty {
                 emptyState
             } else {
                 List {
+                    if model.visible.isEmpty {
+                        Text("No \(model.kindFilter?.plural ?? "items") found.").foregroundStyle(.secondary)
+                    }
                     section("Updates available", systemImage: "arrow.down.circle.fill", tint: .accentColor, items: model.updates,
                             actionTitle: "Update All") { model.requestInstall(model.updates) }
                     section("New — not installed on this Mac", systemImage: "sparkles", tint: .purple, items: model.newInstalls,
@@ -45,6 +52,17 @@ struct ContentView: View {
             footer
         }
         .toolbar {
+            if model.hasApps {
+                ToolbarItem(placement: .principal) {
+                    Picker("Show", selection: $model.kindFilter) {
+                        Text("All").tag(ItemKind?.none)
+                        Text("Plug-ins").tag(ItemKind?.some(.plugin))
+                        Text("Apps").tag(ItemKind?.some(.app))
+                    }
+                    .pickerStyle(.segmented)
+                    .help("Show plug-ins, apps or both")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     Task { await model.refresh() }
@@ -91,10 +109,10 @@ struct ContentView: View {
         VStack(spacing: 12) {
             if model.isChecking {
                 ProgressView()
-                Text("Looking for plug-ins on github.com/\(model.owner)…").foregroundStyle(.secondary)
+                Text("Looking for plug-ins and apps on github.com/\(model.owner)…").foregroundStyle(.secondary)
             } else {
                 Image(systemName: "puzzlepiece.extension").font(.system(size: 40)).foregroundStyle(.secondary)
-                Text("No plug-ins found yet").font(.title3)
+                Text("No plug-ins or apps found yet").font(.title3)
                 Button("Check for Updates") { Task { await model.refresh() } }
             }
         }
@@ -124,6 +142,89 @@ struct ContentView: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+}
+
+/// Update to this app itself.
+private struct AppUpdateBanner: View {
+    @Environment(UpdaterModel.self) private var model
+    let state: UpdaterModel.AppUpdateState
+    @State private var showNotes = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon).font(.title3).foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.body.weight(.semibold))
+                if let detail { Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+            }
+            Spacer()
+            Button("What's New") { showNotes = true }.buttonStyle(.link)
+            actions
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.accentColor.opacity(0.12))
+        .popover(isPresented: $showNotes, arrowEdge: .bottom) {
+            ScrollView {
+                MarkdownView(markdown: ReleaseNotes.clean(state.release.body).isEmpty ? "No release notes." : ReleaseNotes.clean(state.release.body))
+                    .padding(16)
+            }
+            .frame(width: 420, height: 320)
+        }
+    }
+
+    private var tag: String { state.release.tagName }
+
+    private var title: String {
+        switch state {
+        case .available: "SLM Plugins Updater \(tag) is available"
+        case .working: "Updating SLM Plugins Updater to \(tag)…"
+        case .installed: "SLM Plugins Updater \(tag) is installed"
+        case .failed: "Couldn't update SLM Plugins Updater to \(tag)"
+        }
+    }
+
+    private var detail: String? {
+        switch state {
+        case .available:
+            "You have \(SelfUpdater.currentVersion?.description ?? "an older version")."
+                + (model.canInstallAppUpdate ? "" : " Development builds can't update themselves.")
+        case let .working(_, message): message
+        case .installed: "Relaunch to start using it. It's also used the next time you open the app."
+        case let .failed(_, message): message
+        }
+    }
+
+    private var icon: String {
+        switch state {
+        case .available, .working: "arrow.down.app.fill"
+        case .installed: "checkmark.seal.fill"
+        case .failed: "exclamationmark.triangle.fill"
+        }
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        switch state {
+        case .available, .failed:
+            if model.canInstallAppUpdate {
+                Button(state == .available(state.release) ? "Update Now" : "Try Again") {
+                    Task { await model.installAppUpdate() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isInstalling)
+            } else {
+                Link("Download", destination: state.release.htmlUrl)
+            }
+        case .working:
+            ProgressView().controlSize(.small)
+        case .installed:
+            Button("Relaunch") { model.relaunch() }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isInstalling)
+        }
     }
 }
 

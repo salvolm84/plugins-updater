@@ -18,6 +18,21 @@ final class UpdaterModel {
         case failed(String)
     }
 
+    /// This app's own update, shown as a banner above the list.
+    enum AppUpdateState: Equatable {
+        case available(GitHubRelease)
+        case working(GitHubRelease, String)
+        /// Swapped in on disk; takes effect on relaunch.
+        case installed(GitHubRelease)
+        case failed(GitHubRelease, String)
+
+        var release: GitHubRelease {
+            switch self {
+            case let .available(r), let .working(r, _), let .installed(r), let .failed(r, _): r
+            }
+        }
+    }
+
     private(set) var plugins: [PluginItem] = []
     private(set) var isChecking = false
     private(set) var isInstalling = false
@@ -29,13 +44,20 @@ final class UpdaterModel {
     private(set) var authSource: String?
     private(set) var installStates: [String: InstallState] = [:]
     private(set) var log: [LogEntry] = []
+    private(set) var appUpdate: AppUpdateState?
+    /// Restricts the list to plug-ins or apps; `nil` shows both.
+    var kindFilter: ItemKind?
+    /// Off for `--list`, which must not change anything on disk.
+    var allowsUnattendedChanges = true
 
     /// Plugins waiting for the user to confirm in the changelog sheet.
     var pendingConfirmation: [PluginItem]?
 
-    var updates: [PluginItem] { plugins.filter { $0.status == .updateAvailable } }
-    var newInstalls: [PluginItem] { plugins.filter { $0.status == .notInstalled } }
-    var upToDate: [PluginItem] { plugins.filter { $0.status == .upToDate || $0.status == .unknownVersion } }
+    var visible: [PluginItem] { plugins.filter { kindFilter == nil || $0.kind == kindFilter } }
+    var updates: [PluginItem] { visible.filter { $0.status == .updateAvailable } }
+    var newInstalls: [PluginItem] { visible.filter { $0.status == .notInstalled } }
+    var upToDate: [PluginItem] { visible.filter { $0.status == .upToDate || $0.status == .unknownVersion } }
+    var hasApps: Bool { plugins.contains { $0.kind == .app } }
 
     var owner: String { UserDefaults.standard.string(forKey: Prefs.owner) ?? "salvolm84" }
     var includePrereleases: Bool { UserDefaults.standard.bool(forKey: Prefs.includePrereleases) }
@@ -58,6 +80,7 @@ final class UpdaterModel {
             authSource = source
             let client = GitHubClient(token: token)
             async let catalogTask = Catalog.load()
+            async let selfReleases = try? client.releases(fullName: SelfUpdater.repo)
             let repos = try await client.repos(owner: owner)
             let catalog = await catalogTask
             let candidates = repos.filter { !$0.fork && !$0.archived && !catalog.isIgnored($0.name) }
@@ -96,9 +119,13 @@ final class UpdaterModel {
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
 
             lastChecked = Date()
-            lastCheckSummary = "\(updates.count) update(s), \(newInstalls.count) new, \(upToDate.count) up to date"
-            append("Checked \(plugins.count) plugins from github.com/\(owner) (\(source)): \(lastCheckSummary!).")
+            let counts = Dictionary(grouping: plugins, by: \.status).mapValues(\.count)
+            lastCheckSummary = "\(counts[.updateAvailable] ?? 0) update(s), \(counts[.notInstalled] ?? 0) new, "
+                + "\((counts[.upToDate] ?? 0) + (counts[.unknownVersion] ?? 0)) up to date"
+            let appCount = plugins.filter { $0.kind == .app }.count
+            append("Checked \(plugins.count - appCount) plug-ins and \(appCount) apps from github.com/\(owner) (\(source)): \(lastCheckSummary!).")
             if let warningMessage { append(warningMessage, isError: true) }
+            await checkAppUpdate(releases: await selfReleases ?? [], includePrereleases: includePre)
         } catch {
             errorMessage = error.localizedDescription
             append("Check failed: \(error.localizedDescription)", isError: true)
@@ -114,9 +141,19 @@ final class UpdaterModel {
             }
         }) else { return nil }
 
-        let entry = catalog.entry(for: repo.name)
-        // Repos outside the catalog must look like audio plug-ins, so unrelated macOS apps aren't offered.
-        if entry == nil, !repo.hasPluginTopic, !AssetFilter.looksLikePlugin(latest) { return nil }
+        let match = catalog.entry(for: repo.name)
+        let entry = match?.entry
+        let kind: ItemKind
+        if let match {
+            kind = match.kind
+        } else if repo.hasPluginTopic || AssetFilter.looksLikePlugin(latest) {
+            kind = .plugin
+        } else if repo.hasMusicAppTopic {
+            kind = .app
+        } else {
+            // Repos outside the catalog must look music-related, so unrelated macOS apps aren't offered.
+            return nil
+        }
         let record = records[repo.fullName]
         let knownIDs = Set(((entry?.bundleIDs ?? []) + (record?.bundles.compactMap(\.bundleID) ?? [])).map { $0.lowercased() })
         let knownNames = Set(entry?.bundleNames ?? [])
@@ -130,6 +167,7 @@ final class UpdaterModel {
 
         return PluginItem(
             repo: repo,
+            kind: kind,
             displayName: entry?.name ?? repo.name,
             latest: latest,
             releases: releases,
@@ -177,7 +215,7 @@ final class UpdaterModel {
             let id = item.id
             installStates[id] = .working("Preparing…")
             do {
-                let s = try await Installer.stage(item, formats: formats) { [weak self] message in
+                let s = try await Installer.stage(item, formats: item.formatsToInstall(enabled: formats)) { [weak self] message in
                     self?.installStates[id] = .working(message)
                 }
                 installStates[id] = .working("Installing…")
@@ -202,7 +240,7 @@ final class UpdaterModel {
             do {
                 try await Shell.runAsAdmin(
                     script.joined(separator: " && "),
-                    prompt: "SLM Plugins Updater wants to clear the macOS quarantine flag (xattr) on the plug-ins it just installed."
+                    prompt: "SLM Plugins Updater wants to clear the macOS quarantine flag (xattr) on the \(staged.map(\.item).noun) it just installed."
                 )
                 if removeQuarantine { append("Removed quarantine attribute from \(allPaths.count) bundle(s).") }
             } catch {
@@ -240,6 +278,49 @@ final class UpdaterModel {
         await refresh()
     }
 
+    // MARK: - Updating this app
+
+    private func checkAppUpdate(releases: [GitHubRelease], includePrereleases: Bool) async {
+        // Don't undo an update already installed or under way.
+        if case .installed = appUpdate { return }
+        if case .working = appUpdate { return }
+        guard let release = SelfUpdater.newerRelease(in: releases, includePrereleases: includePrereleases) else {
+            appUpdate = nil
+            return
+        }
+        if appUpdate?.release != release { append("SLM Plugins Updater \(release.tagName) is available.") }
+        appUpdate = .available(release)
+        // Install unattended only when no password prompt would appear out of nowhere.
+        if allowsUnattendedChanges, UserDefaults.standard.bool(forKey: Prefs.autoUpdateApp), SelfUpdater.appURL != nil, !SelfUpdater.needsAdmin {
+            await installAppUpdate()
+        }
+    }
+
+    var canInstallAppUpdate: Bool { SelfUpdater.appURL != nil }
+
+    func installAppUpdate() async {
+        switch appUpdate {
+        case let .available(release), let .failed(release, _):
+            appUpdate = .working(release, "Preparing…")
+            do {
+                try await SelfUpdater.install(release) { [weak self] message in
+                    self?.appUpdate = .working(release, message)
+                }
+                appUpdate = .installed(release)
+                append("Updated SLM Plugins Updater to \(release.tagName). Relaunch to use it.")
+            } catch {
+                appUpdate = .failed(release, error.localizedDescription)
+                append("Couldn't update SLM Plugins Updater: \(error.localizedDescription)", isError: true)
+            }
+        default:
+            return
+        }
+    }
+
+    func relaunch() {
+        SelfUpdater.relaunch()
+    }
+
     // MARK: - Misc
 
     var runningDAWs: [String] {
@@ -274,6 +355,8 @@ extension UpdaterModel {
         if let errorMessage { print("error: \(errorMessage)") }
         if let warningMessage { print("warning: \(warningMessage)") }
         print("auth: \(authSource ?? "-")")
+        print("app: \(SelfUpdater.currentVersion?.description ?? "dev build")"
+              + (appUpdate.map { " → \($0.release.tagName) available" } ?? " (up to date)"))
         for item in plugins {
             let status: String = switch item.status {
             case .updateAvailable: "UPDATE"
@@ -281,7 +364,7 @@ extension UpdaterModel {
             case .upToDate: "OK"
             case .unknownVersion: "UNKNOWN"
             }
-            print("[\(status)] \(item.displayName) (\(item.repo.name)) installed=\(item.installedVersion?.description ?? "-") latest=\(item.latest.tagName)")
+            print("[\(status)] \(item.displayName) (\(item.repo.name), \(item.kind.singular)) installed=\(item.installedVersion?.description ?? "-") latest=\(item.latest.tagName)")
             for b in item.installed { print("    \(b.url.path) v\(b.version ?? "?")") }
             for r in ReleaseNotes.releases(in: item, includePrereleases: includePrereleases) {
                 print("    changelog \(r.tagName): \(ReleaseNotes.clean(r.body).prefix(120).replacingOccurrences(of: "\n", with: " ⏎ "))")

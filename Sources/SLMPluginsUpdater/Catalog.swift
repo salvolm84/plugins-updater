@@ -12,9 +12,13 @@ struct Catalog: Codable {
 
     var ignoredRepos: [String]
     var plugins: [Entry]
+    /// Standalone music apps. A separate key so builds older than 1.1 (which can't install apps) ignore them.
+    var apps: [Entry]?
 
-    func entry(for repo: String) -> Entry? {
-        plugins.first { $0.repo.caseInsensitiveCompare(repo) == .orderedSame }
+    func entry(for repo: String) -> (entry: Entry, kind: ItemKind)? {
+        if let e = plugins.first(where: { $0.repo.caseInsensitiveCompare(repo) == .orderedSame }) { return (e, .plugin) }
+        if let e = (apps ?? []).first(where: { $0.repo.caseInsensitiveCompare(repo) == .orderedSame }) { return (e, .app) }
+        return nil
     }
 
     func isIgnored(_ repo: String) -> Bool {
@@ -27,13 +31,16 @@ struct Catalog: Codable {
     static let builtIn = Catalog(
         ignoredRepos: ["plugins-updater", "Tracker", "xbox"],
         plugins: [
-            Entry(repo: "ezplayer", name: "GroovePlayer", bundleIDs: ["com.slm.grooveplayer"]),
+            Entry(repo: "ezplayer", name: "GroovePlayer", bundleIDs: ["com.slm.grooveplayer", "com.slm.grooveplayer.midifx"]),
             Entry(repo: "keylab-drumpad-mapper", name: "Drumpad Remapper", bundleIDs: ["com.slm.drumpadremapper"]),
             Entry(repo: "MIDI-Humanizer", name: "MIDI Humanizer", bundleIDs: ["com.slmaudio.midihumanizer", "com.slmaudio.midihumanizer.inst"]),
             Entry(repo: "MIDIKeySnap", name: "MIDIKeySnap", bundleIDs: ["com.slm.midikeysnap"]),
             Entry(repo: "MidiVelocityMapper", name: "MIDI Velocity Mapper", bundleIDs: ["com.yourcompany.NewProject"], bundleNames: ["NewProject"]),
             Entry(repo: "midi_notes_mapper", name: "MIDI Notes Mapper", bundleIDs: ["com.SLM.MidiMapperEvo"]),
             Entry(repo: "vst_input_calibration", name: "Input Calibration", bundleIDs: ["com.SLM.InputCalibration"]),
+        ],
+        apps: [
+            Entry(repo: "beat-it", name: "Beat It", bundleIDs: ["com.beatit.tempomapper"]),
         ]
     )
 
@@ -48,6 +55,9 @@ struct Catalog: Codable {
         var merged = remote
         for entry in builtIn.plugins where merged.entry(for: entry.repo) == nil {
             merged.plugins.append(entry)
+        }
+        for entry in builtIn.apps ?? [] where merged.entry(for: entry.repo) == nil {
+            merged.apps = (merged.apps ?? []) + [entry]
         }
         merged.ignoredRepos = Array(Set(remote.ignoredRepos + builtIn.ignoredRepos))
         return merged

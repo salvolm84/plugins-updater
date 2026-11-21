@@ -20,6 +20,7 @@ struct SLMPluginsUpdaterApp: App {
         let model = UpdaterModel()
         _model = State(initialValue: model)
         if CommandLine.arguments.contains("--list") {
+            model.allowsUnattendedChanges = false
             Task { @MainActor in await model.printReport(); exit(0) }
         }
     }

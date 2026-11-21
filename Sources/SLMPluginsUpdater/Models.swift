@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 // MARK: - GitHub API
@@ -12,7 +13,9 @@ struct GitHubRepo: Decodable, Hashable {
     var topics: [String]? = nil
 
     static let pluginTopics: Set<String> = ["audio-plugin", "audio-plugins", "vst", "vst3", "audio-unit", "audiounit", "au", "clap", "juce", "daw"]
-    var hasPluginTopic: Bool { !(topics ?? []).filter { Self.pluginTopics.contains($0.lowercased()) }.isEmpty }
+    static let musicAppTopics: Set<String> = ["music", "music-app", "audio-app", "audio", "midi", "music-production", "tempo", "metronome"]
+    var hasPluginTopic: Bool { (topics ?? []).contains { Self.pluginTopics.contains($0.lowercased()) } }
+    var hasMusicAppTopic: Bool { (topics ?? []).contains { Self.musicAppTopics.contains($0.lowercased()) } }
 }
 
 struct GitHubRelease: Decodable, Hashable, Identifiable {
@@ -120,7 +123,16 @@ struct InstalledBundle: Hashable, Identifiable {
     }
 }
 
-// MARK: - Plugin item shown in the UI
+// MARK: - Item shown in the UI
+
+/// Plug-ins install every enabled format; apps always install their `.app`.
+enum ItemKind: String, Codable, CaseIterable, Identifiable {
+    case plugin, app
+
+    var id: String { rawValue }
+    var singular: String { self == .plugin ? "plug-in" : "app" }
+    var plural: String { self == .plugin ? "plug-ins" : "apps" }
+}
 
 enum PluginStatus: Comparable {
     case updateAvailable
@@ -131,6 +143,7 @@ enum PluginStatus: Comparable {
 
 struct PluginItem: Identifiable, Hashable {
     let repo: GitHubRepo
+    let kind: ItemKind
     let displayName: String
     let latest: GitHubRelease
     let releases: [GitHubRelease]
@@ -151,8 +164,32 @@ struct PluginItem: Identifiable, Hashable {
 
     /// Formats this release ships, guessed from asset names (refined after unzip).
     var offeredFormats: [PluginFormat] {
-        let hints = latest.assets.filter(AssetFilter.isMacAsset).compactMap(AssetFilter.formatHint)
+        var hints = Set(latest.assets.filter(AssetFilter.isMacAsset).compactMap(AssetFilter.formatHint))
+        if kind == .app { hints.insert(.app) }
         return PluginFormat.allCases.filter(hints.contains)
+    }
+
+    /// What to unpack from the release: an app's `.app` comes regardless of the format settings.
+    func formatsToInstall(enabled: Set<PluginFormat>) -> Set<PluginFormat> {
+        kind == .app ? enabled.union([.app]) : enabled
+    }
+
+    /// Names of installed copies of this item's `.app` that are running right now.
+    var runningAppNames: [String] {
+        let ids = Set(installed.filter { $0.format == .app }.compactMap { $0.bundleID?.lowercased() })
+        guard !ids.isEmpty else { return [] }
+        return NSWorkspace.shared.runningApplications.compactMap { app in
+            guard let id = app.bundleIdentifier?.lowercased(), ids.contains(id) else { return nil }
+            return app.localizedName
+        }.uniqued()
+    }
+}
+
+extension Collection where Element == PluginItem {
+    /// "plug-ins", "apps" or "items" for a mixed batch.
+    var noun: String {
+        let kinds = Set(map(\.kind))
+        return kinds.count == 1 ? (count == 1 ? kinds.first!.singular : kinds.first!.plural) : (count == 1 ? "item" : "items")
     }
 }
 

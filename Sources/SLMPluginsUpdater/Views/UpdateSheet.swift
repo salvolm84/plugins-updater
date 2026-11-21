@@ -18,13 +18,13 @@ struct UpdateSheet: View {
             }
             .padding(20)
 
-            let daws = model.runningDAWs
+            let daws = items.contains { $0.kind == .plugin } ? model.runningDAWs : []
             if !daws.isEmpty {
-                Label("\(daws.joined(separator: ", ")) is running. Quit it before installing so the new plug-in version is loaded.",
-                      systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 10)
+                warning("\(daws.joined(separator: ", ")) is running. Quit it before installing so the new plug-in version is loaded.")
+            }
+            let runningApps = items.flatMap(\.runningAppNames).uniqued()
+            if !runningApps.isEmpty {
+                warning("\(runningApps.joined(separator: ", ")) is running. Quit it before updating; the open copy keeps running the old version.")
             }
 
             Divider()
@@ -63,11 +63,18 @@ struct UpdateSheet: View {
         .frame(width: 640, height: 560)
     }
 
+    private func warning(_ text: String) -> some View {
+        Label(text, systemImage: "exclamationmark.triangle.fill")
+            .foregroundStyle(.orange)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 10)
+    }
+
     private var title: String {
         switch (updateCount, newCount) {
-        case (_, 0): updateCount == 1 ? "Update \(items[0].displayName)?" : "Update \(updateCount) plug-ins?"
-        case (0, _): newCount == 1 ? "Install \(items[0].displayName)?" : "Install \(newCount) new plug-ins?"
-        default: "Update \(updateCount) and install \(newCount) plug-ins?"
+        case (_, 0): updateCount == 1 ? "Update \(items[0].displayName)?" : "Update \(updateCount) \(items.noun)?"
+        case (0, _): newCount == 1 ? "Install \(items[0].displayName)?" : "Install \(newCount) new \(items.noun)?"
+        default: "Update \(updateCount) and install \(newCount) \(items.noun)?"
         }
     }
 
